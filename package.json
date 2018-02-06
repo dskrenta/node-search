@@ -1,0 +1,19 @@
+{
+  "name": "node-search",
+  "version": "0.0.0",
+  "description": "Node.js persistent full text search engine",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dskrenta/node-search.git"
+  },
+  "author": "David Skrenta",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/dskrenta/node-search/issues"
+  },
+  "homepage": "https://github.com/dskrenta/node-search#readme"
+}
