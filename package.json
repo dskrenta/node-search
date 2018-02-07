@@ -15,5 +15,10 @@
   "bugs": {
     "url": "https://github.com/dskrenta/node-search/issues"
   },
-  "homepage": "https://github.com/dskrenta/node-search#readme"
+  "homepage": "https://github.com/dskrenta/node-search#readme",
+  "dependencies": {
+    "compromise": "^11.3.0",
+    "crypto": "^1.0.1",
+    "stopwords": "0.0.9"
+  }
 }
