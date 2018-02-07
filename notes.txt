@@ -1,0 +1,18 @@
+const index = new NodeSearch();
+
+index.addSchema({
+    id: {type: 'Id'},
+    location: {type: 'GeoPoint'},
+    name: {type: 'Text'},
+
+});
+
+types: 
+
+text
+value
+number
+date
+boolean
+binary
+number range
