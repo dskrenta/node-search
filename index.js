@@ -137,8 +137,10 @@ class NodeSearch {
   queryCoordination(tokenizedQuery, documentId) {
     let matchingTerms = 0;
     for (let token of tokenizedQuery) {
-      if (documentId in this.invertedIndex[token]) {
-        matchingTerms++;
+      if (token in this.invertedIndex) { 
+        if (documentId in this.invertedIndex[token]) {
+          matchingTerms++;
+        }
       }
     }
     return matchingTerms / tokenizedQuery.length;
