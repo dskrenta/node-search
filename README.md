@@ -1,4 +1,4 @@
-# node-search
+# node-search - WIP
 Node.js persistent full text search engine 
 
 ## Implementation Notes
