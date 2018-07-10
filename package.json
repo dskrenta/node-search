@@ -19,6 +19,7 @@
   "dependencies": {
     "compromise": "^11.3.0",
     "crypto": "^1.0.1",
+    "level": "^4.0.0",
     "stopwords": "0.0.9"
   }
 }
