@@ -2,12 +2,14 @@
 
 const NodeSearch = require('./index.js');
 
-const index = new NodeSearch();
+const index = new NodeSearch('./data/test');
 
+/*
 index.addFieldBoosts({
   title: 2,
   body: 1
 });
+*/
 
 const documents = [
   {
@@ -60,9 +62,10 @@ const documents = [
   }
 ];
 
-documents.forEach(document => index.addDocument(document));
+// documents.forEach(document => index.add(document));
 
-const results = index.search('alan bean, neil armstrong');
+// const results = index.search('alan bean, neil armstrong');
 
-console.log(results);
+// console.log(results);
 
+index.log();
