@@ -58,5 +58,5 @@ typings/
 .env
 
 # Leveldb data
-data
+data/
 
