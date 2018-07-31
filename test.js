@@ -63,9 +63,24 @@ const documents = [
 ];
 
 // documents.forEach(document => index.add(document));
+// const promises = documents.map(document => index.add(document));
+
+async function main() {
+  try {
+    const promises = documents.map(document => index.add(document));
+    await Promise.all(promises);
+
+    index.log();
+  }
+  catch (error) {
+    console.error(error);
+  }
+}
+
+main(); 
 
 // const results = index.search('alan bean, neil armstrong');
 
 // console.log(results);
 
-index.log();
+// index.log();
