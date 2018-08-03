@@ -1,155 +1,290 @@
 'use strict';
-const crypto = require('crypto');
+
+const level = require('level');
 const nlp = require('compromise');
 const stopwords = require('stopwords').english;
+const crypto = require('crypto');
+
+const INVERTED_INDEX_KEY_PREFIX = 'InvertedIndex';
+const DOCUMENT_STORE_KEY_PREFIX =  'DocumentStore';
+const FIELDS_KEY_PREFIX = 'Fields';
+const FIELDS_COUNT_KEY = 'FieldsCount';
+const FIELDS_BOOST_KEY = 'FieldsBoosts';
+const DOCUMENT_COUNT_KEY = 'DocumentCount';
 
 class NodeSearch {
-  constructor() {
-    this.invertedIndex = {};
-    this.documentStore = {};
-    this.fields = {};
-    this.fieldsCount = 0;
-    this.fieldBoosts = [];
+  constructor(storePath) {
+    this.store = level(storePath);
   }
 
-  addDocument(document) {
-    const documentId = crypto.createHash('md5').update(JSON.stringify(document)).digest('hex');
-    this.documentStore[documentId] = document;
-    this.indexDocument(document, documentId);
-  }
+  // Public 
 
-  addFieldBoosts(fieldBoosts) {
-    for (let field in fieldBoosts) {
-      this.fieldBoosts[this.fields[field]] = fieldBoosts[field];
+  async add(document) {
+    try {
+      const documentId = this._generateDocumentId(document);
+      await this.store.put(`${DOCUMENT_STORE_KEY_PREFIX}:${documentId}`, JSON.stringify(document));
+      await this._incrementNumDocuments(1);
+      await this._indexDocument(documentId, document);
+    }
+    catch(error) {
+      console.error(error);
     }
   }
 
-  indexDocument(document, documentId) {
-    const tokenizedDocument = this.tokenizeFields(document);
-    // stem verbs
-    for (let field in tokenizedDocument) {
-      for (let token of tokenizedDocument[field]) {
-        if (!stopwords.includes(token)) {
-          const posting = [
-            this.termFrequency(token, tokenizedDocument[field]),
-            this.inverseDocumentFrequency(token),
-            this.fieldLengthNormalization(tokenizedDocument[field]),
-            this.fields[field]
-          ];
-          if (token in this.invertedIndex) {
-            if (documentId in this.invertedIndex[token]) {
-              this.invertedIndex[token][documentId].push(posting);
-            }
-            else {
-              this.invertedIndex[token][documentId] = [posting];
-            }
+  async update(documentId, partialUpdatedDocument) {
+    try {
+      const previousDocumentVersion = await this.get(documentId);
+      const newDocument = Object.assign({}, previousDocumentVersion, partialUpdatedDocument);
+      await this.store.put(`${DOCUMENT_STORE_KEY_PREFIX}:${documentId}`, JSON.stringify(newDocument));
+    }
+    catch (error) {
+      console.error(error);
+    }
+  }
+
+  async delete(documentId) {
+    try {
+      await this.store.del(`${DOCUMENT_STORE_KEY_PREFIX}:${documentId}`);
+    }
+    catch (error) {
+      console.error(error);
+    } 
+  }
+
+  async get(documentId) {
+    try {
+      return await this.store.get(`${DOCUMENT_STORE_KEY_PREFIX}:${documentId}`);
+    }
+    catch (error) {
+      if (error.notFound) {
+        return null;
+      }
+      console.error(error);
+    } 
+  }
+
+  search() {
+    return null;
+  }
+
+  log() {
+    this.store.createReadStream()
+      .on('data', (data) => {
+        console.log(`${data.key}: ${data.value}`);
+        console.log('\n');
+      })
+      .on('error', function (err) {
+        console.log('Error', err)
+      })
+      .on('end', function () {
+        console.log('Stream ended')
+      });
+  }
+
+  addFieldBoosts() {
+    return null;
+  }
+
+  // Private
+
+  _generateDocumentId(document) {
+    return crypto.createHash('md5').update(JSON.stringify(document)).digest('hex');
+  }
+
+  async _indexDocument(documentId, document) {
+    try {
+      const tokenizedDocument = this._tokenizeFields(document);
+      for (let field in tokenizedDocument) {
+        for (let token of tokenizedDocument[field]) {
+          if (!stopwords.includes(token)) {
+            const idf = await this._inverseDocumentFrequency(token);
+            const posting = [
+              this._termFrequency(token, tokenizedDocument[field]),
+              idf,
+              this._fieldLengthNormalization(tokenizedDocument[field])
+            ];
+            this._invertedIndexInsert(token, documentId, posting);
           }
-          else {
-            this.invertedIndex[token] = {[documentId]: [posting]};
-          }
         }
       }
     }
+    catch(error) {
+      console.error(error);
+    }
   }
 
-  scoreDocuments(tokenizedQuery) {
-    const scores = {};
-    for (let token of tokenizedQuery) {
-      for (let documentId in this.invertedIndex[token]) {
-        if (documentId in scores) {
-          scores[documentId] += this.termScore(this.invertedIndex[token][documentId]);
+  async _invertedIndexInsert(token, documentId, posting) {
+    try {
+      const record = await this._invertedIndexGetToken(token);
+      if (record) {
+        const parsed = JSON.parse(record);
+        if (documentId in parsed) {
+          parsed[documentId].push(posting);
+        } 
+        else { 
+          parsed[documentId] = [posting];
         }
-        else {
-          scores[documentId] = this.termScore(this.invertedIndex[token][documentId]);
-        }
+        await this._invertedIndexSetToken(token, JSON.stringify(parsed));
+      }
+      else {
+        const createdRecord = {[documentId]: [posting]};
+        await this._invertedIndexSetToken(token, JSON.stringify(createdRecord));
       }
     }
-    return scores;
-  }
-
-  termScore(postings) {
-    let score = 0;
-    for (let posting of postings) {
-      score += posting[0] * posting[1] * posting[2] * this.fieldBoosts[posting[3]];
+    catch(error) {
+      console.error(error);
     }
-    return score;
   }
 
-  search(query) {
-    const tokenizedQuery = this.tokenizeNormalize(query);
-    const queryIdfs = tokenizedQuery.map(token => this.inverseDocumentFrequency(token));
-    const results = this.scoreDocuments(tokenizedQuery);
-    for (let documentId in results) {
-      results[documentId] *= this.queryNormalization(queryIdfs) * this.queryCoordination(tokenizedQuery, documentId);
+  async _invertedIndexGetToken(token) {
+    try {
+      return await this.store.get(`${INVERTED_INDEX_KEY_PREFIX}:${token}`);
     }
-    const sortedResults = Object.keys(results).sort((a, b) => {
-      if (results[a] < results[b]) {
-        return 1;
+    catch (error) {
+      if (error.notFound) {
+        return null;
       }
-      if (results[a] > results[b]) {
-        return -1;
-      }
-      return 0;
-    });
-    return sortedResults.map(key => this.documentStore[key]);
+      console.error(error);
+    }
   }
 
-  tokenizeFields(document) {
+  async _invertedIndexSetToken(token, record) {
+    try {
+      await this.store.put(`${INVERTED_INDEX_KEY_PREFIX}:${token}`, record);
+    }
+    catch (error) {
+      console.error(error);
+    }
+  }
+
+  _termFrequency(term, tokenizedDocument) {
+    const frequency = tokenizedDocument.filter(token => token === term).length;
+    return Math.sqrt(frequency);
+  }
+
+  async _inverseDocumentFrequency(term) {
+    try {
+      const numDocuments = await this._getNumDocuments();
+      const documentsContainTermRaw = await this._invertedIndexGetToken(term);
+      const documentsContainTerm = JSON.parse(documentsContainTermRaw);
+      const numDocumentsContainTerm = documentsContainTerm ? documentsContainTerm.length : 0;
+      return 1 + Math.log(numDocuments / (numDocumentsContainTerm + 1));  
+    }
+    catch(error) {
+      console.error(error);
+    }
+  }
+
+  _fieldLengthNormalization(tokenizedDocument) {
+    return 1 / Math.sqrt(tokenizedDocument.length);
+  }
+
+  _tokenizeFields(document) {
     const tokenizedDocument = {};
     for (let field in document) {
-      if (!(field in this.fields)) {
-        this.fields[field] = this.fieldsCount;
-        if (!this.fieldBoosts[this.fieldsCount]) this.fieldBoosts[this.fieldsCount] = 1;
-        this.fieldsCount++;
-      }
-      if (typeof document[field] == 'string') {
-        tokenizedDocument[field] = this.tokenizeNormalize(document[field]);
+      if (typeof document[field] === 'string') {
+        tokenizedDocument[field] = this._tokenizeNormalize(document[field]);
       }
     }
     return tokenizedDocument;
   }
 
-  tokenizeNormalize(string) {
+  _tokenizeNormalize(string) {
     const parsed = nlp(string);
     return parsed.terms().data().map(data => data.normal);
   }
 
-  termFrequency(term, tokenizedDocument) {
-    const frequency = tokenizedDocument.filter(token => token === term).length;
-    return Math.sqrt(frequency);
-  }
-
-  inverseDocumentFrequency(term) {
-    const numDocuments = Object.keys(this.documentStore).length;
-    const numDocumentsContainTerm = term in this.invertedIndex ? Object.keys(this.invertedIndex[term]).length : 0;
-    return 1 + Math.log(numDocuments / (numDocumentsContainTerm + 1));
-  }
-
-  fieldLengthNormalization(tokenizedDocument) {
-    return 1 / Math.sqrt(tokenizedDocument.length);
-  }
-
-  queryNormalization(queryIdfs) {
-    const sumOfSquaredWeights = queryIdfs.reduce((total, idf) => total + Math.sqrt(idf, 2));
-    return 1 / Math.sqrt(sumOfSquaredWeights);
-  }
-
-  queryCoordination(tokenizedQuery, documentId) {
-    let matchingTerms = 0;
-    for (let token of tokenizedQuery) {
-      if (token in this.invertedIndex) { 
-        if (documentId in this.invertedIndex[token]) {
-          matchingTerms++;
-        }
-      }
+  async _getFieldsCount() {
+    try {
+      return await this.store.get(FIELDS_COUNT_KEY);
     }
-    return matchingTerms / tokenizedQuery.length;
+    catch (error) {
+      console.error(error);
+    }
   }
 
-  log() {
-    console.log(`Inverted Index: ${JSON.stringify(this.invertedIndex, null, 2)}`);
-    console.log(`Document Store: ${JSON.stringify(this.documentStore, null, 2)}`);
-    console.log(`Fields: ${JSON.stringify(this.fields, null, 2)}`);
+  async _setFieldsCount(count) {
+    try {
+      await this.store.put(FIELDS_COUNT_KEY, count);
+    }
+    catch (error) {
+      console.error(error);
+    }
+  }
+
+  async _getFieldBoosts() {
+    try {
+      const rawFieldBoosts = await this.store.get(FIELDS_BOOST_KEY);
+      return rawFieldBoosts.split(',');
+    }
+    catch (error) {
+      if (error.notFound) {
+        return null;
+      }
+      console.error(error);
+    }
+  }
+
+  async _setFieldBoosts(boosts) {
+    try {
+      await this.store.put(FIELDS_BOOST_KEY, boosts.join(','));
+    }
+    catch (error) {
+      console.error(error);
+    }
+  } 
+
+  async _getField(field) {
+    try {
+      return await this.store.get(`${FIELDS_KEY_PREFIX}:${field}`);
+    }
+    catch (error) {
+      if (error.notFound) {
+        return null;
+      }
+      console.error(error);
+    }
+  }
+
+  async _setField(field, count) {
+    try {
+      await this.store.put(`${FIELDS_KEY_PREFIX}:${field}`, count);
+    }
+    catch (error) {
+      console.error(error);
+    }
+  }
+
+  async _getNumDocuments() {
+    try {
+      return await this.store.get(DOCUMENT_COUNT_KEY);
+    }
+    catch (error) {
+      if (error.notFound) {
+        return null;
+      }
+      console.error(error);
+    }
+  }
+
+  async _setNumDocuments(field, num) {
+    try {
+      await this.store.put(DOCUMENT_COUNT_KEY, num);
+    }
+    catch (error) {
+      console.error(error);
+    }
+  }
+
+  async _incrementNumDocuments(num = 1) {
+    try {
+      const storedDocumentCount = await this._getNumDocuments();
+      const documentCount = storedDocumentCount || 0;
+      await this._setNumDocuments(documentCount + num);
+    }
+    catch (error) {
+      console.error(error);
+    }
   }
 }
 

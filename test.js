@@ -2,12 +2,14 @@
 
 const NodeSearch = require('./index.js');
 
-const index = new NodeSearch();
+const index = new NodeSearch('./data/test');
 
+/*
 index.addFieldBoosts({
   title: 2,
   body: 1
 });
+*/
 
 const documents = [
   {
@@ -60,9 +62,25 @@ const documents = [
   }
 ];
 
-documents.forEach(document => index.addDocument(document));
+// documents.forEach(document => index.add(document));
+// const promises = documents.map(document => index.add(document));
 
-const results = index.search('alan bean, neil armstrong');
+async function main() {
+  try {
+    const promises = documents.map(document => index.add(document));
+    await Promise.all(promises);
 
-console.log(results);
+    index.log();
+  }
+  catch (error) {
+    console.error(error);
+  }
+}
 
+main(); 
+
+// const results = index.search('alan bean, neil armstrong');
+
+// console.log(results);
+
+// index.log();
